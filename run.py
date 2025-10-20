@@ -193,6 +193,56 @@ def blend_mask(image_path_or_pil_image, mask, enhance_coe, kernel_size, interpol
 from apiprompting.api_llava.functions import getmask, get_model
 from apiprompting.api_llava.hook import hook_logger
 
+# Override get_model with a cached, quantization-aware loader for Colab/T4/L4
+# Uses apillava.model.builder directly to enable 4-bit/8-bit when needed.
+_MODEL_CACHE = {}
+
+def _detect_quantization_preference():
+    try:
+        q = os.getenv("LLAVA_QUANT", "").strip().lower()
+        if q in ("4bit", "8bit", "fp16"):
+            return q
+        # Heuristic: T4 (16GB) → 4bit by default; otherwise fp16
+        if torch.cuda.is_available():
+            props = torch.cuda.get_device_properties(0)
+            total_gb = props.total_memory / (1024**3)
+            if total_gb <= 17.0:
+                return "4bit"
+    except Exception:
+        pass
+    return "fp16"
+
+def get_model(model_name):
+    quant = _detect_quantization_preference()
+    cache_key = (model_name, quant)
+    if cache_key in _MODEL_CACHE:
+        return _MODEL_CACHE[cache_key]
+
+    # Lazy import to avoid hard dependency at module import time
+    from apillava.model.builder import load_pretrained_model
+    from apillava.mm_utils import get_model_name_from_path
+
+    model_path = f"liuhaotian/{model_name}"
+    model_base = None
+    inner_name = get_model_name_from_path(model_path)
+
+    load_kwargs = {"device_map": "auto", "device": "cuda"}
+    if quant == "4bit":
+        load_kwargs.update({"load_4bit": True})
+    elif quant == "8bit":
+        load_kwargs.update({"load_8bit": True})
+    # else default fp16 via builder
+
+    tokenizer, model, image_processor, context_len = load_pretrained_model(
+        model_path=model_path,
+        model_base=model_base,
+        model_name=inner_name,
+        **load_kwargs,
+    )
+
+    _MODEL_CACHE[cache_key] = (tokenizer, model, image_processor, context_len, inner_name)
+    return _MODEL_CACHE[cache_key]
+
 def custom_llava_api(images, queries, model_name, batch_size=1, layer_index=20, enhance_coe=10, kernel_size=3, interpolate_method_name="LANCZOS", grayscale=0):
     """
     Generates image masks and blends them using the specified model and parameters.
