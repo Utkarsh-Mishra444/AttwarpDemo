@@ -196,6 +196,8 @@ from apiprompting.api_llava.hook import hook_logger
 # Override get_model with a cached, quantization-aware loader for Colab/T4/L4
 # Uses apillava.model.builder directly to enable 4-bit/8-bit when needed.
 _MODEL_CACHE = {}
+MODEL_READY = False
+MODEL_LOADING = False
 
 def _detect_quantization_preference():
     try:
@@ -242,6 +244,32 @@ def get_model(model_name):
 
     _MODEL_CACHE[cache_key] = (tokenizer, model, image_processor, context_len, inner_name)
     return _MODEL_CACHE[cache_key]
+
+def warmup_llava_model_async(model_name="llava-v1.5-7b"):
+    """Warm up the LLaVA model in a background thread so first request doesn't block/fail."""
+    global MODEL_READY, MODEL_LOADING
+    if MODEL_READY or MODEL_LOADING:
+        return
+    try:
+        from threading import Thread
+    except Exception:
+        return
+
+    def _load():
+        global MODEL_READY, MODEL_LOADING
+        MODEL_LOADING = True
+        try:
+            # Trigger lazy load and cache fill
+            get_model(model_name)
+            MODEL_READY = True
+            print("Model warmup complete.")
+        except Exception as e:
+            print(f"Model warmup failed: {e}")
+            MODEL_READY = False
+        finally:
+            MODEL_LOADING = False
+
+    Thread(target=_load, daemon=True).start()
 
 def custom_llava_api(images, queries, model_name, batch_size=1, layer_index=20, enhance_coe=10, kernel_size=3, interpolate_method_name="LANCZOS", grayscale=0):
     """
@@ -771,6 +799,23 @@ HTML_TEMPLATE = """
             border-top: 1px solid var(--gray-200);
         }
 
+        /* Model status banner */
+        .status-banner {
+            display: none;
+            margin-bottom: 1rem;
+            padding: 1rem 1.25rem;
+            border-radius: 12px;
+            border: 1px solid var(--gray-200);
+            background: linear-gradient(135deg, rgba(99,102,241,0.08) 0%, rgba(236,72,153,0.08) 100%);
+            color: var(--gray-700);
+            box-shadow: var(--shadow-sm);
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+        .status-icon { font-size: 1.25rem; }
+        .status-strong { color: var(--primary-dark); font-weight: 600; }
+
         @media (max-width: 768px) {
             h1 {
                 font-size: 1.75rem;
@@ -850,6 +895,10 @@ HTML_TEMPLATE = """
                 <button type="submit" class="btn btn-primary">
                     ✨ Generate Attention Warp
                 </button>
+            <div id="statusBanner" class="status-banner" role="status" aria-live="polite">
+                <span class="status-icon">⏳</span>
+                <span><span class="status-strong">Preparing model</span> — downloading weights and warming up. This may take a few minutes on first run.</span>
+            </div>
             </form>
 
             <div id="loading" class="loading">
@@ -871,6 +920,33 @@ HTML_TEMPLATE = """
     </div>
 
     <script>
+        // Wait for model readiness to avoid first-call errors during warmup
+        const submitBtn = document.querySelector('#warpForm button');
+        const loadingBanner = document.getElementById('loading');
+        const statusBanner = document.getElementById('statusBanner');
+        async function waitForReady(timeoutMs = 300000) {
+            const start = Date.now();
+            while (Date.now() - start < timeoutMs) {
+                try {
+                    const r = await fetch('/ready');
+                    const j = await r.json();
+                    if (j && j.ready === true) return true;
+                } catch (_) {}
+                await new Promise(res => setTimeout(res, 1500));
+            }
+            return false;
+        }
+
+        // Kick off readiness check on load
+        (async () => {
+            if (submitBtn) submitBtn.disabled = true;
+            if (loadingBanner) loadingBanner.style.display = 'block';
+            if (statusBanner) statusBanner.style.display = 'flex';
+            const ok = await waitForReady();
+            if (loadingBanner) loadingBanner.style.display = 'none';
+            if (statusBanner) statusBanner.style.display = ok ? 'none' : 'flex';
+            if (submitBtn) submitBtn.disabled = !ok;
+        })();
         // Image upload and preview
         const uploadZone = document.getElementById('uploadZone');
         const imageInput = document.getElementById('image');
@@ -1040,6 +1116,14 @@ if FLASK_AVAILABLE:
     @app.route('/')
     def index():
         return render_template_string(HTML_TEMPLATE)
+
+    @app.route('/ready')
+    def ready():
+        global MODEL_READY, MODEL_LOADING
+        return jsonify({
+            'ready': MODEL_READY,
+            'loading': MODEL_LOADING
+        })
 
     @app.route('/process', methods=['POST'])
     def process_image():
@@ -1222,6 +1306,12 @@ if FLASK_AVAILABLE:
         else:
             print(f"Starting web server at http://localhost:{port}")
             print("Press Ctrl+C to stop")
+
+        # Begin warmup once server is about to start
+        try:
+            warmup_llava_model_async("llava-v1.5-7b")
+        except Exception as _e:
+            print(f"Warmup init failed: {_e}")
 
         app.run(host=host, port=port, debug=debug, use_reloader=False)
 
