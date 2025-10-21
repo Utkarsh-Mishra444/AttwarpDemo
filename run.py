@@ -1983,8 +1983,7 @@ if __name__ == '__main__':
         print(f"IN_COLAB: {IN_COLAB}, CLOUDFLARE_AVAILABLE: {CLOUDFLARE_AVAILABLE}")
 
         if IN_COLAB:
-            print("🚀 Colab detected - will use Cloudflare tunnel (super easy!)")
-            print("Just run: !python run.py")
+            print("Colab detected - using Cloudflare tunnel. Please use Cloudflare URL") 
         else:
             print("Open your browser to http://localhost:5000")
         run_server()
