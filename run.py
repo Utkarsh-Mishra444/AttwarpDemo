@@ -352,7 +352,7 @@ HTML_TEMPLATE = """
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>LLaVA Attention Warping Studio</title>
+    <title>Attwarp Demo</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <style>
         * {
@@ -856,8 +856,8 @@ HTML_TEMPLATE = """
 <body>
     <div class="container">
         <div class="header">
-            <h1>LLaVA Attention Warping Studio</h1>
-            <p class="subtitle">Research demo — attention-guided spatial warping</p>
+            <h1>Attwarp Demo</h1>
+            <p class="subtitle">Attention-guided image warping (LLaVA used for attention)</p>
         </div>
 
         <div class="main-content">
@@ -938,7 +938,7 @@ HTML_TEMPLATE = """
             </div>
 
             <div class="footer" style="margin-top: 2rem;">
-                LLaVA Attention Warping — Research Demo
+                Attwarp — Research Demo
             </div>
         </div>
     </div>
