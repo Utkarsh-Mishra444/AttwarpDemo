@@ -423,21 +423,6 @@ HTML_TEMPLATE = """
             border-bottom: 1px solid var(--gray-200);
         }
 
-        .header::before {
-            content: '';
-            position: absolute;
-            top: -50%;
-            left: -50%;
-            width: 200%;
-            height: 200%;
-            background: radial-gradient(circle, rgba(255,255,255,0.1) 0%, transparent 70%);
-            animation: pulse 8s ease-in-out infinite;
-        }
-
-        @keyframes pulse {
-            0%, 100% { transform: scale(1) rotate(0deg); }
-            50% { transform: scale(1.1) rotate(180deg); }
-        }
 
         h1 {
             color: var(--gray-900);
@@ -751,6 +736,10 @@ HTML_TEMPLATE = """
         .link-btn { background: white; border: 1px solid var(--gray-300); padding: 0.4rem 0.7rem; border-radius: 8px; color: var(--gray-700); text-decoration: none; font-size: 0.9rem; }
         .link-btn:hover { border-color: var(--primary); color: var(--primary-dark); }
 
+        /* Side-by-side and All views */
+        .sidebyside { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+        .all-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 1rem; }
+
         .result-section {
             background: white;
             padding: 2rem;
@@ -816,12 +805,9 @@ HTML_TEMPLATE = """
         .image-container img {
             width: 100%;
             display: block;
-            transition: transform 0.3s ease;
         }
 
-        .image-container:hover img {
-            transform: scale(1.02);
-        }
+        .image-container:hover img {}
 
         .footer {
             text-align: center;
@@ -897,17 +883,6 @@ HTML_TEMPLATE = """
                             <h3>Warping Parameters</h3>
                             <div class="parameter-grid">
                                 <div class="form-group">
-                                    <label for="transform">Transform Function</label>
-                                    <select id="transform" name="transform">
-                                        <option value="identity">Identity (No transform)</option>
-                                        <option value="square">Square (x²)</option>
-                                        <option value="sqrt" selected>Square Root (√x)</option>
-                                        <option value="exp">Exponential (eˣ)</option>
-                                        <option value="log">Logarithmic (ln x)</option>
-                                    </select>
-                                </div>
-
-                                <div class="form-group">
                                     <label for="attention_alpha">Attention Overlay Alpha</label>
                                     <input type="number" id="attention_alpha" name="attention_alpha" value="0.4" step="0.05" min="0" max="1">
                                 </div>
@@ -917,6 +892,16 @@ HTML_TEMPLATE = """
                         <details class="parameter-section">
                             <summary style="cursor:pointer; font-weight:600; color: var(--gray-700);">Advanced</summary>
                             <div class="parameter-grid" style="margin-top: 0.75rem;">
+                                <div class="form-group">
+                                    <label for="transform">Transform Function</label>
+                                    <select id="transform" name="transform">
+                                        <option value="identity" selected>Identity (No transform)</option>
+                                        <option value="square">Square (x²)</option>
+                                        <option value="sqrt">Square Root (√x)</option>
+                                        <option value="exp">Exponential (eˣ)</option>
+                                        <option value="log">Logarithmic (ln x)</option>
+                                    </select>
+                                </div>
                                 <div class="form-group">
                                     <label for="exp_scale">Exponential Scale</label>
                                     <input type="number" id="exp_scale" name="exp_scale" value="1.0" step="0.1" min="0.1" max="10">
@@ -1046,29 +1031,36 @@ HTML_TEMPLATE = """
             const tabsBar = document.createElement('div');
             tabsBar.className = 'tabs';
             const panels = [];
+            const labelToIndex = new Map();
+            function activate(idx) {
+                panels.forEach((p, i) => {
+                    const sel = i === idx;
+                    p.btn.setAttribute('aria-selected', sel ? 'true' : 'false');
+                    if (sel) p.panel.classList.add('active'); else p.panel.classList.remove('active');
+                });
+            }
+            const switchTo = (label) => { if (labelToIndex.has(label)) activate(labelToIndex.get(label)); };
             tabsConfig.forEach((t, idx) => {
+                labelToIndex.set(t.label, idx);
                 const btn = document.createElement('button');
                 btn.className = 'tab-btn';
                 btn.type = 'button';
                 btn.setAttribute('role', 'tab');
-                btn.setAttribute('aria-selected', idx === 0 ? 'true' : 'false');
+                btn.setAttribute('aria-selected', 'false');
                 btn.textContent = t.label;
                 tabsBar.appendChild(btn);
 
                 const panel = document.createElement('div');
-                panel.className = 'tab-panel' + (idx === 0 ? ' active' : '');
+                panel.className = 'tab-panel';
                 panel.setAttribute('role', 'tabpanel');
-                panel.appendChild(t.content());
+                panel.appendChild(t.content(switchTo));
                 panels.push({ btn, panel });
 
-                btn.addEventListener('click', () => {
-                    panels.forEach(p => { p.btn.setAttribute('aria-selected', 'false'); p.panel.classList.remove('active'); });
-                    btn.setAttribute('aria-selected', 'true');
-                    panel.classList.add('active');
-                });
+                btn.addEventListener('click', () => activate(idx));
             });
             wrapper.appendChild(tabsBar);
             panels.forEach(p => wrapper.appendChild(p.panel));
+            if (labelToIndex.has('All')) activate(labelToIndex.get('All')); else activate(0);
             return wrapper;
         }
 
@@ -1153,6 +1145,24 @@ HTML_TEMPLATE = """
 
             // Images Section with tabs
             const tabs = createTabs([
+                { label: 'All', content: (switchTo) => {
+                    const c = document.createElement('div');
+                    const grid = document.createElement('div'); grid.className = 'all-grid';
+                    const items = [
+                        { title: 'Original', path: result.original_image, target: 'Original' },
+                        { title: 'Overlay', path: result.masked_overlay, target: 'Overlay' },
+                        { title: 'Warped', path: result.warped_image, target: 'Warped' }
+                    ];
+                    items.forEach(it => {
+                        const card = document.createElement('div'); card.className = 'image-container'; card.style.cursor = 'pointer';
+                        const h4 = document.createElement('h4'); h4.textContent = it.title; card.appendChild(h4);
+                        const img = document.createElement('img'); img.src = '/results/' + it.path; img.alt = it.title; img.loading = 'lazy'; card.appendChild(img);
+                        card.addEventListener('click', () => switchTo(it.target));
+                        grid.appendChild(card);
+                    });
+                    c.appendChild(grid);
+                    return c;
+                } },
                 { label: 'Original', content: () => {
                     const c = document.createElement('div');
                     c.innerHTML = `<div class="image-container"><img src="/results/${result.original_image}" alt="Original" loading="lazy"></div>`;
@@ -1179,7 +1189,12 @@ HTML_TEMPLATE = """
                 } },
                 { label: 'Comparison', content: () => {
                     const c = document.createElement('div');
-                    c.appendChild(buildCompare(result.original_image, result.warped_image));
+                    const side = document.createElement('div'); side.className = 'sidebyside';
+                    side.innerHTML = `
+                        <div class=\"image-container\"><img src=\"/results/${result.original_image}\" alt=\"Original\" loading=\"lazy\"></div>
+                        <div class=\"image-container\"><img src=\"/results/${result.warped_image}\" alt=\"Warped\" loading=\"lazy\"></div>
+                    `;
+                    c.appendChild(side);
                     return c;
                 } }
             ]);
@@ -1243,7 +1258,7 @@ if FLASK_AVAILABLE:
 
             image_file = request.files['image']
             query = request.form.get('query', '')
-            transform = request.form.get('transform', 'sqrt')
+            transform = request.form.get('transform', 'identity')
             exp_scale = float(request.form.get('exp_scale', '1.0'))
             exp_divisor = float(request.form.get('exp_divisor', '1.0'))
             attention_alpha = float(request.form.get('attention_alpha', '0.4'))
@@ -1377,44 +1392,18 @@ if FLASK_AVAILABLE:
     def run_server(host='0.0.0.0', port=5000, debug=False):
         """Run the Flask web server"""
         if IN_COLAB:
-            print("🌐 Detected Colab environment - setting up Cloudflare tunnel...")
-
-            # Try Cloudflare tunnel first (easiest!)
             try:
-                print("Setting up Cloudflare tunnel...")
                 output_queue, metrics_port = Queue(), randint(8100, 9000)
                 thread = Timer(2, cloudflared_tunnel, args=(port, metrics_port, output_queue))
-                thread.start()
-                thread.join()
+                thread.start(); thread.join()
                 tunnel_url = output_queue.get()
-                print(f"🚀 SUCCESS! Access your app at: {tunnel_url}")
-                print(f"Local development URL: http://localhost:{port}")
-                print("Press Ctrl+C to stop")
-            except Exception as e:
-                print(f"Cloudflare tunnel failed: {e}")
-                print("Falling back to Colab's built-in tunneling...")
-
-                # Fallback to Colab's built-in tunneling
-                if COLAB_MODULE_AVAILABLE:
-                    try:
-                        import google.colab.output as colab_output
-                        print("Setting up Colab tunnel...")
-                        colab_output.serve_kernel_port_unstable(port, path="/")
-                        print("🚀 Colab tunnel is active!")
-                        print("Look for the pop-up notification in Colab with your access link")
-                        print(f"Local development URL: http://localhost:{port}")
-                        print("Press Ctrl+C to stop")
-                    except Exception as e2:
-                        print(f"Failed to set up Colab tunnel: {e2}")
-                        print(f"Server running locally at http://localhost:{port}")
-                        print("Note: You may not be able to access this URL in Colab")
-                else:
-                    print("No tunneling options available")
-                    print(f"Server running locally at http://localhost:{port}")
-                    print("Note: You may not be able to access this URL in Colab")
+                print(f"URL: {tunnel_url}")
+                print(f"Local: http://localhost:{port}")
+            except Exception:
+                # Minimal fallback output
+                print(f"Local: http://localhost:{port}")
         else:
-            print(f"Starting web server at http://localhost:{port}")
-            print("Press Ctrl+C to stop")
+            print(f"Local: http://localhost:{port}")
 
         # Begin warmup once server is about to start
         try:
