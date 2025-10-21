@@ -198,6 +198,7 @@ from apiprompting.api_llava.hook import hook_logger
 _MODEL_CACHE = {}
 MODEL_READY = False
 MODEL_LOADING = False
+MODEL_PHASE = "starting"  # starting | loading_model | warmup | ready
 
 def _detect_quantization_preference():
     try:
@@ -247,7 +248,7 @@ def get_model(model_name):
 
 def warmup_llava_model_async(model_name="llava-v1.5-7b"):
     """Warm up the LLaVA model in a background thread so first request doesn't block/fail."""
-    global MODEL_READY, MODEL_LOADING
+    global MODEL_READY, MODEL_LOADING, MODEL_PHASE
     if MODEL_READY or MODEL_LOADING:
         return
     try:
@@ -256,16 +257,21 @@ def warmup_llava_model_async(model_name="llava-v1.5-7b"):
         return
 
     def _load():
-        global MODEL_READY, MODEL_LOADING
+        global MODEL_READY, MODEL_LOADING, MODEL_PHASE
         MODEL_LOADING = True
+        MODEL_PHASE = "loading_model"
         try:
             # Trigger lazy load and cache fill
             get_model(model_name)
+            MODEL_PHASE = "warmup"
+            # Optional lightweight warmup step could be added here
             MODEL_READY = True
+            MODEL_PHASE = "ready"
             print("Model warmup complete.")
         except Exception as e:
             print(f"Model warmup failed: {e}")
             MODEL_READY = False
+            MODEL_PHASE = "starting"
         finally:
             MODEL_LOADING = False
 
@@ -383,10 +389,11 @@ HTML_TEMPLATE = """
 
         body {
             font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: var(--gray-100);
             min-height: 100vh;
             padding: 2rem 1rem;
             line-height: 1.6;
+            color: var(--gray-800);
         }
 
         .container {
@@ -411,11 +418,9 @@ HTML_TEMPLATE = """
         }
 
         .header {
-            background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
-            padding: 3rem 2rem;
-            text-align: center;
-            position: relative;
-            overflow: hidden;
+            background: white;
+            padding: 1.25rem 2rem;
+            border-bottom: 1px solid var(--gray-200);
         }
 
         .header::before {
@@ -435,38 +440,55 @@ HTML_TEMPLATE = """
         }
 
         h1 {
-            color: white;
-            font-size: 2.5rem;
-            font-weight: 700;
-            margin-bottom: 0.5rem;
-            position: relative;
-            z-index: 1;
-            text-shadow: 0 2px 10px rgba(0,0,0,0.2);
+            color: var(--gray-900);
+            font-size: 1.5rem;
+            font-weight: 600;
+            margin-bottom: 0.25rem;
         }
 
         .subtitle {
-            color: rgba(255,255,255,0.9);
-            font-size: 1.1rem;
+            color: var(--gray-600);
+            font-size: 0.95rem;
             font-weight: 400;
-            position: relative;
-            z-index: 1;
         }
 
         .main-content {
-            padding: 2.5rem;
+            padding: 1.5rem 2rem 2rem 2rem;
+        }
+
+        /* Two-column layout */
+        .layout {
+            display: grid;
+            grid-template-columns: 360px 1fr;
+            gap: 1.5rem;
+        }
+        .sidebar {
+            position: sticky;
+            top: 1rem;
+            align-self: start;
+        }
+        .content {
+            min-height: 300px;
+        }
+
+        .card {
+            background: white;
+            border: 1px solid var(--gray-200);
+            border-radius: 14px;
+            box-shadow: var(--shadow-sm);
         }
 
         .upload-zone {
             border: 3px dashed var(--gray-300);
-            border-radius: 16px;
-            padding: 3rem 2rem;
+            border-radius: 14px;
+            padding: 1.5rem;
             text-align: center;
             transition: all 0.3s ease;
             cursor: pointer;
             position: relative;
             overflow: hidden;
             background: var(--gray-50);
-            margin-bottom: 2rem;
+            margin-bottom: 1rem;
         }
 
         .upload-zone:hover {
@@ -527,9 +549,7 @@ HTML_TEMPLATE = """
             display: block;
         }
 
-        .form-group {
-            margin-bottom: 1.5rem;
-        }
+        .form-group { margin-bottom: 1rem; }
 
         label {
             display: block;
@@ -558,12 +578,7 @@ HTML_TEMPLATE = """
             box-shadow: 0 0 0 4px rgba(99,102,241,0.1);
         }
 
-        .parameter-section {
-            background: var(--gray-50);
-            padding: 1.5rem;
-            border-radius: 16px;
-            margin-bottom: 2rem;
-        }
+        .parameter-section { background: var(--gray-50); padding: 1rem; border-radius: 14px; margin-bottom: 1rem; }
 
         .parameter-section h3 {
             color: var(--gray-800);
@@ -642,11 +657,7 @@ HTML_TEMPLATE = """
             overflow: hidden;
         }
 
-        .btn-primary {
-            background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
-            color: white;
-            box-shadow: var(--shadow-lg);
-        }
+        .btn-primary { background: var(--primary); color: white; box-shadow: var(--shadow); }
 
         .btn-primary:hover:not(:disabled) {
             transform: translateY(-2px);
@@ -713,11 +724,32 @@ HTML_TEMPLATE = """
             75% { transform: translateX(10px); }
         }
 
-        .results {
-            margin-top: 3rem;
-            display: none;
-            animation: fadeIn 0.5s ease-in;
+        .results { margin-top: 1rem; display: none; animation: fadeIn 0.5s ease-in; }
+
+        /* Tabs */
+        .tabs { display: flex; gap: 0.5rem; border-bottom: 1px solid var(--gray-200); }
+        .tab-btn {
+            background: transparent;
+            border: none;
+            padding: 0.75rem 1rem;
+            cursor: pointer;
+            border-bottom: 2px solid transparent;
+            color: var(--gray-600);
+            font-weight: 600;
         }
+        .tab-btn[aria-selected="true"] { color: var(--primary-dark); border-color: var(--primary-dark); }
+        .tab-panel { display: none; padding-top: 1rem; }
+        .tab-panel.active { display: block; }
+
+        /* Before/After slider */
+        .compare-wrap { position: relative; max-width: 100%; overflow: hidden; border-radius: 12px; box-shadow: var(--shadow); border: 1px solid var(--gray-200); }
+        .compare-wrap img { display: block; width: 100%; user-select: none; pointer-events: none; }
+        .compare-top { position: absolute; top: 0; left: 0; height: 100%; width: 50%; overflow: hidden; border-right: 2px solid white; box-shadow: 2px 0 0 rgba(0,0,0,0.08); }
+        .compare-slider { width: 100%; margin-top: 0.75rem; }
+
+        .actions { margin-top: 0.5rem; display: flex; gap: 0.5rem; }
+        .link-btn { background: white; border: 1px solid var(--gray-300); padding: 0.4rem 0.7rem; border-radius: 8px; color: var(--gray-700); text-decoration: none; font-size: 0.9rem; }
+        .link-btn:hover { border-color: var(--primary); color: var(--primary-dark); }
 
         .result-section {
             background: white;
@@ -838,84 +870,91 @@ HTML_TEMPLATE = """
 <body>
     <div class="container">
         <div class="header">
-            <h1>🎨 LLaVA Attention Warping Studio</h1>
-            <p class="subtitle">Transform images through the lens of AI attention</p>
+            <h1>LLaVA Attention Warping Studio</h1>
+            <p class="subtitle">Research demo — attention-guided spatial warping</p>
         </div>
 
         <div class="main-content">
-            <form id="warpForm" enctype="multipart/form-data">
-                <div class="upload-zone" id="uploadZone">
-                    <div class="upload-icon">📸</div>
-                    <div class="upload-text">Click to upload or drag and drop</div>
-                    <div class="upload-subtext">PNG, JPG, WEBP up to 16MB</div>
-                    <input type="file" id="image" name="image" accept="image/*" required>
-                    <div class="preview-container" id="previewContainer">
-                        <img id="preview" alt="Preview">
+            <div class="layout">
+                <!-- Sidebar: Controls -->
+                <aside class="sidebar">
+                    <form id="warpForm" enctype="multipart/form-data" class="card" style="padding: 1rem;">
+                        <div class="upload-zone" id="uploadZone">
+                            <div class="upload-text">Click to upload or drag and drop</div>
+                            <div class="upload-subtext">PNG, JPG, WEBP up to 16MB</div>
+                            <input type="file" id="image" name="image" accept="image/*" required>
+                            <div class="preview-container" id="previewContainer">
+                                <img id="preview" alt="Preview">
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="query">Question</label>
+                            <textarea id="query" name="query" rows="3" placeholder="Ask about the image..." required></textarea>
+                        </div>
+
+                        <div class="parameter-section">
+                            <h3>Warping Parameters</h3>
+                            <div class="parameter-grid">
+                                <div class="form-group">
+                                    <label for="transform">Transform Function</label>
+                                    <select id="transform" name="transform">
+                                        <option value="identity">Identity (No transform)</option>
+                                        <option value="square">Square (x²)</option>
+                                        <option value="sqrt" selected>Square Root (√x)</option>
+                                        <option value="exp">Exponential (eˣ)</option>
+                                        <option value="log">Logarithmic (ln x)</option>
+                                    </select>
+                                </div>
+
+                                <div class="form-group">
+                                    <label for="attention_alpha">Attention Overlay Alpha</label>
+                                    <input type="number" id="attention_alpha" name="attention_alpha" value="0.4" step="0.05" min="0" max="1">
+                                </div>
+                            </div>
+                        </div>
+
+                        <details class="parameter-section">
+                            <summary style="cursor:pointer; font-weight:600; color: var(--gray-700);">Advanced</summary>
+                            <div class="parameter-grid" style="margin-top: 0.75rem;">
+                                <div class="form-group">
+                                    <label for="exp_scale">Exponential Scale</label>
+                                    <input type="number" id="exp_scale" name="exp_scale" value="1.0" step="0.1" min="0.1" max="10">
+                                </div>
+                                <div class="form-group">
+                                    <label for="exp_divisor">Exponential Divisor</label>
+                                    <input type="number" id="exp_divisor" name="exp_divisor" value="1.0" step="0.1" min="0.1" max="10">
+                                </div>
+                            </div>
+                        </details>
+
+                        <button type="submit" class="btn btn-primary" style="margin-top: 0.5rem;">Generate</button>
+                        <div id="statusBanner" class="status-banner" role="status" aria-live="polite">
+                            <span class="status-icon">⏳</span>
+                            <span><span class="status-strong">Preparing model</span> — downloading weights and warming up. This may take a few minutes on first run.</span>
+                        </div>
+                    </form>
+                </aside>
+
+                <!-- Content: Results -->
+                <section class="content">
+                    <div id="loading" class="loading">
+                        <div class="spinner"></div>
+                        <div class="loading-text">Processing with LLaVA...</div>
+                        <div class="loading-subtext">Analyzing attention patterns and warping image</div>
                     </div>
-                </div>
 
-                <div class="form-group">
-                    <label for="query">💬 What would you like to know?</label>
-                    <textarea id="query" name="query" rows="3" placeholder="Ask anything about the image... e.g., 'What objects are on the desk?' or 'Describe the scene'" required></textarea>
-                </div>
+                    <div id="error" class="error"></div>
 
-                <div class="parameter-section">
-                    <h3>⚙️ Warping Parameters</h3>
-                    <div class="parameter-grid">
-                        <div class="form-group">
-                            <label for="transform">Transform Function</label>
-                            <select id="transform" name="transform">
-                                <option value="identity">Identity (No transform)</option>
-                                <option value="square">Square (x²)</option>
-                                <option value="sqrt" selected>Square Root (√x)</option>
-                                <option value="exp">Exponential (eˣ)</option>
-                                <option value="log">Logarithmic (ln x)</option>
-                            </select>
-                        </div>
-
-                        <div class="form-group">
-                            <label for="exp_scale">Exponential Scale</label>
-                            <input type="number" id="exp_scale" name="exp_scale" value="1.0" step="0.1" min="0.1" max="10">
-                        </div>
-
-                        <div class="form-group">
-                            <label for="exp_divisor">Exponential Divisor</label>
-                            <input type="number" id="exp_divisor" name="exp_divisor" value="1.0" step="0.1" min="0.1" max="10">
-                        </div>
-
-                        <div class="form-group">
-                            <label for="attention_alpha">Attention Overlay Alpha</label>
-                            <input type="number" id="attention_alpha" name="attention_alpha" value="0.4" step="0.05" min="0" max="1">
-                        </div>
+                    <div id="results" class="results card" style="padding: 1rem;">
+                        <!-- Results populated by JS -->
                     </div>
-
-                    
-                </div>
-
-                <button type="submit" class="btn btn-primary">
-                    ✨ Generate Attention Warp
-                </button>
-            <div id="statusBanner" class="status-banner" role="status" aria-live="polite">
-                <span class="status-icon">⏳</span>
-                <span><span class="status-strong">Preparing model</span> — downloading weights and warming up. This may take a few minutes on first run.</span>
-            </div>
-            </form>
-
-            <div id="loading" class="loading">
-                <div class="spinner"></div>
-                <div class="loading-text">Processing with LLaVA...</div>
-                <div class="loading-subtext">Analyzing attention patterns and warping image</div>
+                </section>
             </div>
 
-            <div id="error" class="error"></div>
-
-            <div id="results" class="results">
-                <!-- Results will be populated here -->
+            <div class="footer" style="margin-top: 2rem;">
+                LLaVA Attention Warping — Research Demo
             </div>
-        </div>
-
-        <div class="footer">
-            Powered by LLaVA Vision-Language Model • Built with ❤️ for AI Research
         </div>
     </div>
 
@@ -924,12 +963,24 @@ HTML_TEMPLATE = """
         const submitBtn = document.querySelector('#warpForm button');
         const loadingBanner = document.getElementById('loading');
         const statusBanner = document.getElementById('statusBanner');
+        function phaseLabel(p) {
+            if (p === 'loading_model') return 'loading model';
+            if (p === 'warmup') return 'warming up';
+            if (p === 'ready') return 'ready';
+            return 'starting';
+        }
+
         async function waitForReady(timeoutMs = 300000) {
             const start = Date.now();
             while (Date.now() - start < timeoutMs) {
                 try {
                     const r = await fetch('/ready');
                     const j = await r.json();
+                    if (j && j.phase && statusBanner) {
+                        statusBanner.querySelector('span span.status-strong').textContent = 'Preparing model';
+                        const msg = statusBanner.querySelectorAll('span')[1];
+                        if (msg) msg.innerHTML = `<span class="status-strong">Preparing model</span> — ${phaseLabel(j.phase)}...`;
+                    }
                     if (j && j.ready === true) return true;
                 } catch (_) {}
                 await new Promise(res => setTimeout(res, 1500));
@@ -940,7 +991,7 @@ HTML_TEMPLATE = """
         // Kick off readiness check on load
         (async () => {
             if (submitBtn) submitBtn.disabled = true;
-            if (loadingBanner) loadingBanner.style.display = 'block';
+            if (loadingBanner) loadingBanner.style.display = 'none'; // not processing yet
             if (statusBanner) statusBanner.style.display = 'flex';
             const ok = await waitForReady();
             if (loadingBanner) loadingBanner.style.display = 'none';
@@ -987,6 +1038,53 @@ HTML_TEMPLATE = """
                 previewContainer.style.display = 'block';
             };
             reader.readAsDataURL(file);
+        }
+
+        // Tabs helper
+        function createTabs(tabsConfig) {
+            const wrapper = document.createElement('div');
+            const tabsBar = document.createElement('div');
+            tabsBar.className = 'tabs';
+            const panels = [];
+            tabsConfig.forEach((t, idx) => {
+                const btn = document.createElement('button');
+                btn.className = 'tab-btn';
+                btn.type = 'button';
+                btn.setAttribute('role', 'tab');
+                btn.setAttribute('aria-selected', idx === 0 ? 'true' : 'false');
+                btn.textContent = t.label;
+                tabsBar.appendChild(btn);
+
+                const panel = document.createElement('div');
+                panel.className = 'tab-panel' + (idx === 0 ? ' active' : '');
+                panel.setAttribute('role', 'tabpanel');
+                panel.appendChild(t.content());
+                panels.push({ btn, panel });
+
+                btn.addEventListener('click', () => {
+                    panels.forEach(p => { p.btn.setAttribute('aria-selected', 'false'); p.panel.classList.remove('active'); });
+                    btn.setAttribute('aria-selected', 'true');
+                    panel.classList.add('active');
+                });
+            });
+            wrapper.appendChild(tabsBar);
+            panels.forEach(p => wrapper.appendChild(p.panel));
+            return wrapper;
+        }
+
+        function buildCompare(originalPath, warpedPath) {
+            const wrap = document.createElement('div');
+            const compare = document.createElement('div');
+            compare.className = 'compare-wrap';
+            const base = document.createElement('img'); base.src = '/results/' + originalPath; base.alt = 'Original';
+            const top = document.createElement('div'); top.className = 'compare-top';
+            const topImg = document.createElement('img'); topImg.src = '/results/' + warpedPath; topImg.alt = 'Warped';
+            top.appendChild(topImg);
+            compare.appendChild(base); compare.appendChild(top);
+            const slider = document.createElement('input'); slider.type = 'range'; slider.min = 0; slider.max = 100; slider.value = 50; slider.className = 'compare-slider';
+            slider.addEventListener('input', () => { top.style.width = slider.value + '%'; });
+            wrap.appendChild(compare); wrap.appendChild(slider);
+            return wrap;
         }
 
         // Form submission
@@ -1041,7 +1139,7 @@ HTML_TEMPLATE = """
                 textSection.className = 'result-section';
                 const second = (result.text_answers_2 && result.text_answers_2.length > 0) ? result.text_answers_2[0] : '';
                 textSection.innerHTML = `
-                    <h3>🤖 LLaVA Answers</h3>
+                    <h3>LLaVA Answers</h3>
                     <div class="text-answer">
                         <strong>Question:</strong>
                         <div style="margin-bottom: 1rem; color: var(--gray-700);">${escapeHtml(result.query)}</div>
@@ -1053,34 +1151,44 @@ HTML_TEMPLATE = """
                 resultsDiv.appendChild(textSection);
             }
 
-            // Images Section
+            // Images Section with tabs
+            const tabs = createTabs([
+                { label: 'Original', content: () => {
+                    const c = document.createElement('div');
+                    c.innerHTML = `<div class="image-container"><img src="/results/${result.original_image}" alt="Original" loading="lazy"></div>`;
+                    const actions = document.createElement('div'); actions.className = 'actions';
+                    actions.innerHTML = `<a class="link-btn" href="/results/${result.original_image}" target="_blank">Open</a><a class="link-btn" href="/results/${result.original_image}" download>Download</a>`;
+                    c.appendChild(actions);
+                    return c;
+                } },
+                { label: 'Overlay', content: () => {
+                    const c = document.createElement('div');
+                    c.innerHTML = `<div class="image-container"><img src="/results/${result.masked_overlay}" alt="Attention Overlay" loading="lazy"></div>`;
+                    const actions = document.createElement('div'); actions.className = 'actions';
+                    actions.innerHTML = `<a class="link-btn" href="/results/${result.masked_overlay}" target="_blank">Open</a><a class="link-btn" href="/results/${result.masked_overlay}" download>Download</a>`;
+                    c.appendChild(actions);
+                    return c;
+                } },
+                { label: 'Warped', content: () => {
+                    const c = document.createElement('div');
+                    c.innerHTML = `<div class="image-container"><img src="/results/${result.warped_image}" alt="Warped Result" loading="lazy"></div>`;
+                    const actions = document.createElement('div'); actions.className = 'actions';
+                    actions.innerHTML = `<a class="link-btn" href="/results/${result.warped_image}" target="_blank">Open</a><a class="link-btn" href="/results/${result.warped_image}" download>Download</a>`;
+                    c.appendChild(actions);
+                    return c;
+                } },
+                { label: 'Comparison', content: () => {
+                    const c = document.createElement('div');
+                    c.appendChild(buildCompare(result.original_image, result.warped_image));
+                    return c;
+                } }
+            ]);
+
             const imagesSection = document.createElement('div');
             imagesSection.className = 'result-section';
-            imagesSection.innerHTML = '<h3>🖼️ Generated Visualizations</h3>';
-
-            const imageGrid = document.createElement('div');
-            imageGrid.className = 'image-grid';
-
-            const images = [
-                { path: result.original_image, label: '📷 Original Image', emoji: '📷' },
-                { path: result.masked_overlay, label: '🎯 Attention Overlay', emoji: '🎯' },
-                { path: result.warped_image, label: '✨ Warped Result', emoji: '✨' },
-                { path: result.visualization, label: '📊 Full Comparison', emoji: '📊' }
-            ];
-
-            images.forEach(img => {
-                if (img.path) {
-                    const container = document.createElement('div');
-                    container.className = 'image-container';
-                    container.innerHTML = `
-                        <h4>${img.label}</h4>
-                        <img src="/results/${img.path}" alt="${img.label}" loading="lazy">
-                    `;
-                    imageGrid.appendChild(container);
-                }
-            });
-
-            imagesSection.appendChild(imageGrid);
+            const h = document.createElement('h3'); h.textContent = 'Generated Visualizations';
+            imagesSection.appendChild(h);
+            imagesSection.appendChild(tabs);
             resultsDiv.appendChild(imagesSection);
 
             resultsDiv.style.display = 'block';
@@ -1119,10 +1227,11 @@ if FLASK_AVAILABLE:
 
     @app.route('/ready')
     def ready():
-        global MODEL_READY, MODEL_LOADING
+        global MODEL_READY, MODEL_LOADING, MODEL_PHASE
         return jsonify({
             'ready': MODEL_READY,
-            'loading': MODEL_LOADING
+            'loading': MODEL_LOADING,
+            'phase': MODEL_PHASE
         })
 
     @app.route('/process', methods=['POST'])
