@@ -844,12 +844,7 @@ HTML_TEMPLATE = """
                         </div>
                     </div>
 
-                    <div class="form-group" style="margin-top: 1rem;">
-                        <div class="checkbox-group">
-                            <input type="checkbox" id="apply_inverse" name="apply_inverse">
-                            <label for="apply_inverse">Apply inverse transformation to marginal profiles</label>
-                        </div>
-                    </div>
+                    
                 </div>
 
                 <button type="submit" class="btn btn-primary">
@@ -964,17 +959,19 @@ HTML_TEMPLATE = """
             const resultsDiv = document.getElementById('results');
             resultsDiv.innerHTML = '';
 
-            // Text Answer Section
+            // Text Answer Section (original and second pass on warped image if present)
             if (result.text_answers && result.text_answers.length > 0) {
                 const textSection = document.createElement('div');
                 textSection.className = 'result-section';
+                const second = (result.text_answers_2 && result.text_answers_2.length > 0) ? result.text_answers_2[0] : '';
                 textSection.innerHTML = `
-                    <h3>🤖 LLaVA's Answer</h3>
+                    <h3>🤖 LLaVA Answers</h3>
                     <div class="text-answer">
                         <strong>Question:</strong>
                         <div style="margin-bottom: 1rem; color: var(--gray-700);">${escapeHtml(result.query)}</div>
-                        <strong>Answer:</strong>
-                        <div style="color: var(--gray-800); font-size: 1.05rem;">${escapeHtml(result.text_answers[0])}</div>
+                        <strong>Original Image:</strong>
+                        <div style="color: var(--gray-800); font-size: 1.05rem; margin-bottom: 0.75rem;">${escapeHtml(result.text_answers[0])}</div>
+                        ${second ? `<strong>Warped Image:</strong><div style="color: var(--gray-800); font-size: 1.05rem;">${escapeHtml(second)}</div>` : ''}
                     </div>
                 `;
                 resultsDiv.appendChild(textSection);
@@ -1057,7 +1054,7 @@ if FLASK_AVAILABLE:
             exp_scale = float(request.form.get('exp_scale', '1.0'))
             exp_divisor = float(request.form.get('exp_divisor', '1.0'))
             attention_alpha = float(request.form.get('attention_alpha', '0.4'))
-            apply_inverse = request.form.get('apply_inverse') == 'on'
+            # Removed apply_inverse UI; always false in web mode
 
             if not image_file.filename:
                 return jsonify({'error': 'No image file selected'}), 400
@@ -1117,12 +1114,22 @@ if FLASK_AVAILABLE:
                 transform=transform,
                 exp_scale=exp_scale,
                 exp_divisor=exp_divisor,
-                apply_inverse=apply_inverse,
+                apply_inverse=False,
                 attention_alpha=attention_alpha
             )
 
             if not success:
                 return jsonify({'error': 'Image processing failed'}), 500
+
+            # Second LLaVA pass on warped image (for answer on warped content)
+            try:
+                _, _, _, text_answers_2 = custom_llava_api(
+                    [warped_image_save_path],
+                    [query],
+                    model_name="llava-v1.5-7b"
+                )
+            except Exception:
+                text_answers_2 = [""]
 
             # Save text answers
             text_answers_path = os.path.join(current_run_dir, "llava_text_answers.txt")
@@ -1133,6 +1140,14 @@ if FLASK_AVAILABLE:
                     f.write(f"Question {i+1}: {question}\n")
                     f.write(f"Answer {i+1}: {answer}\n")
                     f.write("-" * 30 + "\n\n")
+                # Second pass answers on warped image
+                if text_answers_2 and len(text_answers_2) > 0:
+                    f.write("Second Pass (Warped Image) Answers\n")
+                    f.write("="*50 + "\n\n")
+                    for i, (question, answer) in enumerate(zip(queries, text_answers_2)):
+                        f.write(f"Question {i+1}: {question}\n")
+                        f.write(f"Answer {i+1}: {answer}\n")
+                        f.write("-" * 30 + "\n\n")
 
             # Return result paths (relative to web server)
             result = {
@@ -1142,6 +1157,7 @@ if FLASK_AVAILABLE:
                 'visualization': f'web_run_{run_id}/visualization.png',
                 'query': query,
                 'text_answers': text_answers,
+                'text_answers_2': text_answers_2,
                 'transform': transform,
                 'run_id': run_id
             }
@@ -1459,13 +1475,6 @@ def generate_visualization(image, att_map, warped_image, output_path, transform_
     # Add separator lines
     cv2.line(visualization, (w, 0), (w, target_height), (255, 255, 255), 2)
     cv2.line(visualization, (2*w, 0), (2*w, target_height), (255, 255, 255), 2)
-
-    # Add grid to warped image
-    grid_spacing = 20
-    for x in range(2*w, 2*w + w_warped, grid_spacing):
-        cv2.line(visualization, (x, 0), (x, target_height), (255, 255, 255), 1, cv2.LINE_AA)
-    for y in range(0, target_height, grid_spacing):
-        cv2.line(visualization, (2*w, y), (2*w + w_warped, y), (255, 255, 255), 1, cv2.LINE_AA)
 
     # Save visualization
     cv2.imwrite(output_path, visualization)
