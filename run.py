@@ -1302,6 +1302,7 @@ if FLASK_AVAILABLE:
             masked_overlay_save_path = os.path.join(current_run_dir, "masked_overlay_image.png")
             warped_image_save_path = os.path.join(current_run_dir, "warped_image.png")
             visualization_save_path = os.path.join(current_run_dir, "visualization.png")
+            att_map_npy_save_path = os.path.join(current_run_dir, "attention_map.npy")
 
             # Handle mota_mask
             mota_mask_to_use = mota_mask
@@ -1317,6 +1318,7 @@ if FLASK_AVAILABLE:
                 masked_overlay_save_path=masked_overlay_save_path,
                 output_path=warped_image_save_path,
                 vis_path=visualization_save_path,
+                att_map_npy_path=att_map_npy_save_path,
                 width=500,
                 height=500,
                 transform=transform,
@@ -1724,6 +1726,7 @@ def save_warped_image(image_path, att_map,
                       masked_overlay_save_path, # New path for masked overlay
                       output_path, # Path for warped image
                       vis_path=None,
+                      att_map_npy_path=None, # Path to save the attention map used for warping as .npy
                       width=500, height=500, transform="identity", # width/height now act as defaults/guide for viz
                       exp_scale=1.0, exp_divisor=1.0, apply_inverse=False, attention_alpha=0.5):
     """Process and save warped image, original, and masked overlay, all in original input image dimensions."""
@@ -1767,6 +1770,11 @@ def save_warped_image(image_path, att_map,
             att_map = np.mean(att_map, axis=2)
         elif att_map.ndim != 2:
             raise ValueError(f"Attention map must be 2D, got shape {att_map.shape}")
+
+        # Save the attention map used for warping as .npy
+        if att_map_npy_path:
+            np.save(att_map_npy_path, att_map)
+            print(f"Attention map (for warping) saved to {att_map_npy_path} with shape {att_map.shape}")
 
         # Create and save masked overlay image (using original input dimensions)
         if masked_overlay_save_path:
@@ -1870,6 +1878,8 @@ def main():
     if args.visualization:
         visualization_save_path = os.path.join(current_run_dir, os.path.basename(args.visualization))
 
+    att_map_npy_save_path = os.path.join(current_run_dir, "attention_map.npy")
+
     # Handle mota_mask being a list for the main function
     mota_mask_to_use = mota_mask
     if isinstance(mota_mask, list):
@@ -1888,6 +1898,7 @@ def main():
         masked_overlay_save_path=masked_overlay_save_path,
         output_path=warped_image_save_path,
         vis_path=visualization_save_path,
+        att_map_npy_path=att_map_npy_save_path,
         width=args.width,
         height=args.height,
         transform=args.transform,
